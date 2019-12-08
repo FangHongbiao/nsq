@@ -60,6 +60,10 @@ func (pq *PriorityQueue) Pop() interface{} {
 	return item
 }
 
+// PeekAndShift 根据 传入的max值返回对应的元素
+// 1. 如果堆为空, 返回 `nil, 0`， nil代表没有找到元素，第二个返回值可以区分是因为堆空没找到还是因为堆中最小值都比max大而不满足条件
+// 2. 如果堆中最小值都比max大，返回 `nil, item.Priority - max`
+// 3. 否则返回堆顶元素 `item, 0`
 func (pq *PriorityQueue) PeekAndShift(max int64) (*Item, int64) {
 	if pq.Len() == 0 {
 		return nil, 0
