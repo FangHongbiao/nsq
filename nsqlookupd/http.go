@@ -65,10 +65,12 @@ func (s *httpServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	s.router.ServeHTTP(w, req)
 }
 
+// pingHandler 对应 `/ping`, 正常返回 'OK'
 func (s *httpServer) pingHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	return "OK", nil
 }
 
+// doInfo 对应 `/info`, 返回版本号信息的json字符串
 func (s *httpServer) doInfo(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	return struct {
 		Version string `json:"version"`
@@ -77,6 +79,7 @@ func (s *httpServer) doInfo(w http.ResponseWriter, req *http.Request, ps httprou
 	}, nil
 }
 
+// doTopics 对应 `/topics`， 返回所有已经注册的主题，注意查询格式为`FindRegistrations("topic", "*", "")`, Key为通配符`*`, SubKey 为空
 func (s *httpServer) doTopics(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	topics := s.ctx.nsqlookupd.DB.FindRegistrations("topic", "*", "").Keys()
 	return map[string]interface{}{
@@ -84,6 +87,7 @@ func (s *httpServer) doTopics(w http.ResponseWriter, req *http.Request, ps httpr
 	}, nil
 }
 
+// doChannels 对应 `/channels`, 返回订阅给定主题的所有已经注册的通道， 注意查询格式为`FindRegistrations("channel", topicName, "*")`, Key 为 主题名称， SubKey为通配符
 func (s *httpServer) doChannels(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := http_api.NewReqParams(req)
 	if err != nil {
@@ -101,6 +105,7 @@ func (s *httpServer) doChannels(w http.ResponseWriter, req *http.Request, ps htt
 	}, nil
 }
 
+// doLookup 对应 `/lookup`， 返回订阅给定主题的所有已经注册的通道和生产者
 func (s *httpServer) doLookup(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := http_api.NewReqParams(req)
 	if err != nil {
@@ -127,6 +132,7 @@ func (s *httpServer) doLookup(w http.ResponseWriter, req *http.Request, ps httpr
 	}, nil
 }
 
+// doCreateTopic 对应 `/topic/create`, 构建注册信息的结构体`Registration{"topic", topicName, ""}`, Key 为 `topicName`, SubKey为空串
 func (s *httpServer) doCreateTopic(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := http_api.NewReqParams(req)
 	if err != nil {
@@ -149,6 +155,9 @@ func (s *httpServer) doCreateTopic(w http.ResponseWriter, req *http.Request, ps 
 	return nil, nil
 }
 
+// doDeleteTopic 对应 `/topic/delete`, 有两个步骤需要做：
+// 1. 查询所有订阅了该主题的通道，移除这些通道的注册信息
+// 2. 找到该主题的注册信息并移除
 func (s *httpServer) doDeleteTopic(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := http_api.NewReqParams(req)
 	if err != nil {
@@ -159,13 +168,13 @@ func (s *httpServer) doDeleteTopic(w http.ResponseWriter, req *http.Request, ps 
 	if err != nil {
 		return nil, http_api.Err{400, "MISSING_ARG_TOPIC"}
 	}
-
+	// 1. 查询所有订阅了该主题的通道，移除这些通道的注册信息
 	registrations := s.ctx.nsqlookupd.DB.FindRegistrations("channel", topicName, "*")
 	for _, registration := range registrations {
 		s.ctx.nsqlookupd.logf(LOG_INFO, "DB: removing channel(%s) from topic(%s)", registration.SubKey, topicName)
 		s.ctx.nsqlookupd.DB.RemoveRegistration(registration)
 	}
-
+	// 2. 找到该主题的注册信息并移除 (返回的是切片，因为传入的topicName有可能是通配符*)
 	registrations = s.ctx.nsqlookupd.DB.FindRegistrations("topic", topicName, "")
 	for _, registration := range registrations {
 		s.ctx.nsqlookupd.logf(LOG_INFO, "DB: removing topic(%s)", topicName)
@@ -175,6 +184,8 @@ func (s *httpServer) doDeleteTopic(w http.ResponseWriter, req *http.Request, ps 
 	return nil, nil
 }
 
+// doTombstoneTopicProducer 对应 `/topic/tombstone`, 接收topic和node，为生产该topic的node设置tombstone
+// TODO 为一个topic的node设置了tombstone，会不会影响到该生产生产其他topic (从node结构体定义以及doNodes方法来看，是在一个node上，主题与tombstone状态一一对应)
 func (s *httpServer) doTombstoneTopicProducer(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := http_api.NewReqParams(req)
 	if err != nil {
@@ -203,6 +214,9 @@ func (s *httpServer) doTombstoneTopicProducer(w http.ResponseWriter, req *http.R
 	return nil, nil
 }
 
+// doCreateChannel 对应 `/channel/create`，需要注意，这里其实需要两步，不仅仅需要创建channel，如果该channel要订阅的topic不存在，也需要自动创建
+// 1. 构建并添加 channel注册信息结构体`Registration{"channel", topicName, channelName}`, 注意Key和SubKey
+// 2. 构建并添加 topic注册信息结构体`Registration{"topic", topicName, ""}`
 func (s *httpServer) doCreateChannel(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := http_api.NewReqParams(req)
 	if err != nil {
@@ -225,6 +239,8 @@ func (s *httpServer) doCreateChannel(w http.ResponseWriter, req *http.Request, p
 	return nil, nil
 }
 
+// doDeleteChannel 对应 `/channel/delete`, 找到channel注册信息 `FindRegistrations("channel", topicName, channelName)`并移除
+// 注意：这里没有检查移除了channel之后topic的订阅者是否为空，即使为空，topic依然存在
 func (s *httpServer) doDeleteChannel(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	reqParams, err := http_api.NewReqParams(req)
 	if err != nil {
@@ -249,31 +265,42 @@ func (s *httpServer) doDeleteChannel(w http.ResponseWriter, req *http.Request, p
 	return nil, nil
 }
 
+// 定义节点node
 type node struct {
-	RemoteAddress    string   `json:"remote_address"`
-	Hostname         string   `json:"hostname"`
-	BroadcastAddress string   `json:"broadcast_address"`
-	TCPPort          int      `json:"tcp_port"`
-	HTTPPort         int      `json:"http_port"`
-	Version          string   `json:"version"`
-	Tombstones       []bool   `json:"tombstones"`
-	Topics           []string `json:"topics"`
+	RemoteAddress    string   `json:"remote_address"`	// 远程主机的地址(ip)
+	Hostname         string   `json:"hostname"`	// 主机名
+	BroadcastAddress string   `json:"broadcast_address"`	// TODO 广播地址，具体啥作用 
+	TCPPort          int      `json:"tcp_port"` // TCP端口号
+	HTTPPort         int      `json:"http_port"` // HTTP端口号
+	Version          string   `json:"version"`	// 版本
+	Tombstones       []bool   `json:"tombstones"`	// TODOTombstone状态，注意是个结构体，下面的topic也是个结构体，是否异议对应
+	Topics           []string `json:"topics"` 	// topic
 }
 
+// doNodes 对应 `/nodes`
+// 1. 获取所有生产者， 注意`FindProducers("client", "", "")`， 为什么category是`client`, 目前还不知道哪里创建时用了这个category
+// 2. 不过滤tombstoned节点
+// 3. 遍历每个生产者，找到其对应的topics以及对于每个topic对应的tombstone状态tombstones
 func (s *httpServer) doNodes(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
-	// dont filter out tombstoned nodes
+	// 1/2. 获取所有生产者, 并且不过滤tombstoned节点(FilterByActive的最后一个参数为0)
 	producers := s.ctx.nsqlookupd.DB.FindProducers("client", "", "").FilterByActive(
 		s.ctx.nsqlookupd.opts.InactiveProducerTimeout, 0)
 	nodes := make([]*node, len(producers))
 	topicProducersMap := make(map[string]Producers)
+
+	// 遍历每个生产者, 完成topics和tombstones赋值
 	for i, p := range producers {
+		// 先把每个生产者注册拥有的主题的key查询出来
 		topics := s.ctx.nsqlookupd.DB.LookupRegistrations(p.peerInfo.id).Filter("topic", "*", "").Keys()
 
+		// tombstones和topics一一对应，创建长度相等的切片保存tombstone信息
 		// for each topic find the producer that matches this peer
 		// to add tombstone information
 		tombstones := make([]bool, len(topics))
 		for j, t := range topics {
+			// 对于每个主题，根据主题key，先查出所有的生产者
 			if _, exists := topicProducersMap[t]; !exists {
+				// 存在主题的生产者还没有添加到topicProducersMap中的情况
 				topicProducersMap[t] = s.ctx.nsqlookupd.DB.FindProducers("topic", t, "")
 			}
 
@@ -303,6 +330,8 @@ func (s *httpServer) doNodes(w http.ResponseWriter, req *http.Request, ps httpro
 	}, nil
 }
 
+// doDebug 对应 `/debug` 返回 registrationMap 中的注册信息
+// 注意这里用的是 `读锁` RLock() RUnlock()
 func (s *httpServer) doDebug(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	s.ctx.nsqlookupd.DB.RLock()
 	defer s.ctx.nsqlookupd.DB.RUnlock()
