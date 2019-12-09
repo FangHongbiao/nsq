@@ -112,6 +112,7 @@ func (s *httpServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	s.router.ServeHTTP(w, req)
 }
 
+// pingHandler 对应 `/ping`， 返回nsqd的健康状态
 func (s *httpServer) pingHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	health := s.ctx.nsqd.GetHealth()
 	if !s.ctx.nsqd.IsHealthy() {
@@ -120,6 +121,7 @@ func (s *httpServer) pingHandler(w http.ResponseWriter, req *http.Request, ps ht
 	return health, nil
 }
 
+// doInfo 对应 `/info`, 返回版本信息和节点信息
 func (s *httpServer) doInfo(w http.ResponseWriter, req *http.Request, ps httprouter.Params) (interface{}, error) {
 	hostname, err := os.Hostname()
 	if err != nil {

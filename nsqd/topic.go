@@ -42,7 +42,7 @@ type Topic struct {
 	ctx *context
 }
 
-// Topic constructor
+// NewTopic 创建一个新的Topic. Topic constructor
 func NewTopic(topicName string, ctx *context, deleteCallback func(*Topic)) *Topic {
 	t := &Topic{
 		name:              topicName,
@@ -88,6 +88,7 @@ func NewTopic(topicName string, ctx *context, deleteCallback func(*Topic)) *Topi
 	return t
 }
 
+// Start 向startChan写入1，表明topic进入start状态 
 func (t *Topic) Start() {
 	select {
 	case t.startChan <- 1:
